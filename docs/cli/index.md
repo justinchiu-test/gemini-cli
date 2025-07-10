@@ -26,3 +26,27 @@ Gemini CLI executes the command and prints the output to your terminal. Note tha
 ```bash
 gemini -p "What is fine tuning?"
 ```
+
+## Command-line flags
+
+Gemini CLI supports several command-line flags to customize its behavior:
+
+- **`--prompt` or `-p`**: Execute a single prompt in non-interactive mode
+- **`--provider`**: Choose the LLM provider (`gemini`, `cohere`, `coherestaging`)
+- **`--model`**: Specify which model to use
+- **`--resume`**: Resume a previous conversation by ID
+- **`--interactive` or `-i`**: Force interactive mode even when piping input
+- **`--help`**: Display help information
+
+### Using alternative providers
+
+To use Cohere instead of Gemini:
+
+```bash
+# With API key set
+export COHERE_API_KEY="your-api-key"
+gemini --provider cohere "Your prompt"
+
+# With specific model
+gemini --provider cohere --model command-a-03-2025 "Your prompt"
+```

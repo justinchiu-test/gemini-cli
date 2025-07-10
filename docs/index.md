@@ -12,6 +12,8 @@ This documentation is organized into the following sections:
 
 - **[Execution and Deployment](./deployment.md):** Information for running Gemini CLI.
 - **[Architecture Overview](./architecture.md):** Understand the high-level design of Gemini CLI, including its components and how they interact.
+- **Providers:**
+  - **[Cohere Provider](./providers/cohere.md):** Using Cohere as an alternative LLM provider.
 - **CLI Usage:** Documentation for `packages/cli`.
   - **[CLI Introduction](./cli/index.md):** Overview of the command-line interface.
   - **[Commands](./cli/commands.md):** Description of available CLI commands.

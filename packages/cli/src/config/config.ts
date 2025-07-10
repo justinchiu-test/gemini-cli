@@ -38,6 +38,7 @@ const logger = {
 
 export interface CliArgs {
   model: string | undefined;
+  provider: string | undefined;
   sandbox: boolean | string | undefined;
   sandboxImage: string | undefined;
   debug: boolean | undefined;
@@ -73,6 +74,11 @@ export async function parseArguments(): Promise<CliArgs> {
       type: 'string',
       description: `Model`,
       default: process.env.GEMINI_MODEL || DEFAULT_GEMINI_MODEL,
+    })
+    .option('provider', {
+      type: 'string',
+      description: 'LLM provider (gemini, cohere, coherestaging)',
+      choices: ['gemini', 'cohere', 'coherestaging'],
     })
     .option('prompt', {
       alias: 'p',
@@ -419,6 +425,7 @@ export async function loadCliConfig(
     fileDiscoveryService: fileService,
     bugCommand: settings.bugCommand,
     model: argv.model!,
+    provider: argv.provider,
     extensionContextFilePaths,
     maxSessionTurns: settings.maxSessionTurns ?? -1,
     experimentalAcp: argv.experimentalAcp || false,

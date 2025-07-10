@@ -72,6 +72,30 @@ The Vertex AI API provides a [free tier](https://cloud.google.com/vertex-ai/gene
 
 For other authentication methods, including Google Workspace accounts, see the [authentication](./docs/cli/authentication.md) guide.
 
+### Use Cohere API:
+
+The Gemini CLI also supports using Cohere as an alternative LLM provider:
+
+1. Get your Cohere API key from [Cohere Dashboard](https://dashboard.cohere.com/api-keys).
+2. Set it as an environment variable in your terminal:
+
+   ```bash
+   export COHERE_API_KEY="YOUR_API_KEY"
+   ```
+
+3. Run the CLI with the Cohere provider:
+
+   ```bash
+   gemini --provider cohere
+   ```
+
+You can also use Cohere's staging environment:
+
+```bash
+export CO_API_KEY_STAGING="YOUR_STAGING_KEY"
+gemini --provider coherestaging
+```
+
 ## Examples
 
 Once the CLI is running, you can start interacting with Gemini from your shell.

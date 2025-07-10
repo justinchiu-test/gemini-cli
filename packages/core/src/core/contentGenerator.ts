@@ -18,6 +18,7 @@ import { DEFAULT_GEMINI_MODEL } from '../config/models.js';
 import { Config } from '../config/config.js';
 import { getEffectiveModel } from './modelCheck.js';
 import { UserTierId } from '../code_assist/types.js';
+import { CohereContentGenerator } from '../providers/cohereContentGenerator.js';
 
 /**
  * Interface abstracting the core functionalities for generating content and counting tokens.
@@ -43,6 +44,8 @@ export enum AuthType {
   USE_GEMINI = 'gemini-api-key',
   USE_VERTEX_AI = 'vertex-ai',
   CLOUD_SHELL = 'cloud-shell',
+  USE_COHERE = 'cohere-api-key',
+  USE_COHERE_STAGING = 'cohere-staging-api-key',
 }
 
 export type ContentGeneratorConfig = {
@@ -61,6 +64,8 @@ export function createContentGeneratorConfig(
   const googleApiKey = process.env.GOOGLE_API_KEY || undefined;
   const googleCloudProject = process.env.GOOGLE_CLOUD_PROJECT || undefined;
   const googleCloudLocation = process.env.GOOGLE_CLOUD_LOCATION || undefined;
+  const cohereApiKey = process.env.COHERE_API_KEY || undefined;
+  const cohereStagingApiKey = process.env.CO_API_KEY_STAGING || undefined;
 
   // Use runtime model from config if available, otherwise fallback to parameter or default
   const effectiveModel = config.getModel() || DEFAULT_GEMINI_MODEL;
@@ -101,6 +106,20 @@ export function createContentGeneratorConfig(
     return contentGeneratorConfig;
   }
 
+  if (authType === AuthType.USE_COHERE && cohereApiKey) {
+    contentGeneratorConfig.apiKey = cohereApiKey;
+    contentGeneratorConfig.vertexai = false;
+    
+    return contentGeneratorConfig;
+  }
+
+  if (authType === AuthType.USE_COHERE_STAGING && cohereStagingApiKey) {
+    contentGeneratorConfig.apiKey = cohereStagingApiKey;
+    contentGeneratorConfig.vertexai = false;
+    
+    return contentGeneratorConfig;
+  }
+
   return contentGeneratorConfig;
 }
 
@@ -138,6 +157,22 @@ export async function createContentGenerator(
     });
 
     return googleGenAI.models;
+  }
+
+  if (config.authType === AuthType.USE_COHERE && config.apiKey) {
+    return new CohereContentGenerator({
+      apiKey: config.apiKey,
+      model: config.model || 'command-a-03-2025',
+      baseURL: 'https://api.cohere.ai/compatibility/v1',
+    });
+  }
+
+  if (config.authType === AuthType.USE_COHERE_STAGING && config.apiKey) {
+    return new CohereContentGenerator({
+      apiKey: config.apiKey,
+      model: config.model || 'c3-sweep-ecsydrkq-690h-fp16',
+      baseURL: 'https://stg.api.cohere.ai/compatibility/v1',
+    });
   }
 
   throw new Error(

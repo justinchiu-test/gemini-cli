@@ -145,6 +145,7 @@ export interface ConfigParameters {
   fileDiscoveryService?: FileDiscoveryService;
   bugCommand?: BugCommandSettings;
   model: string;
+  provider?: string;
   extensionContextFilePaths?: string[];
   maxSessionTurns?: number;
   experimentalAcp?: boolean;
@@ -191,6 +192,7 @@ export class Config {
   private readonly cwd: string;
   private readonly bugCommand: BugCommandSettings | undefined;
   private readonly model: string;
+  private readonly provider: string | undefined;
   private readonly extensionContextFilePaths: string[];
   private readonly noBrowser: boolean;
   private readonly ideMode: boolean;
@@ -248,6 +250,7 @@ export class Config {
     this.fileDiscoveryService = params.fileDiscoveryService ?? null;
     this.bugCommand = params.bugCommand;
     this.model = params.model;
+    this.provider = params.provider;
     this.extensionContextFilePaths = params.extensionContextFilePaths ?? [];
     this.maxSessionTurns = params.maxSessionTurns ?? -1;
     this.experimentalAcp = params.experimentalAcp ?? false;
@@ -282,6 +285,27 @@ export class Config {
       await this.getGitService();
     }
     this.toolRegistry = await this.createToolRegistry();
+    
+    // Initialize content generator config with provider if specified
+    if (this.provider) {
+      const authType = this.getAuthTypeFromProvider(this.provider);
+      if (authType) {
+        await this.refreshAuth(authType);
+      }
+    }
+  }
+  
+  private getAuthTypeFromProvider(provider: string): AuthType | undefined {
+    switch (provider) {
+      case 'cohere':
+        return AuthType.USE_COHERE;
+      case 'coherestaging':
+        return AuthType.USE_COHERE_STAGING;
+      case 'gemini':
+        return AuthType.USE_GEMINI;
+      default:
+        return undefined;
+    }
   }
 
   async refreshAuth(authMethod: AuthType) {
