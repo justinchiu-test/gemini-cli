@@ -853,9 +853,9 @@ export const useGeminiStream = (
 
       // Use try-catch to ensure flag is cleared even if submitQuery throws
       try {
-        // Now we can send an empty continuation query since the responses are in history
+        // Send the tool responses (they're also in history now for Cohere)
         await submitQuery(
-          [],
+          mergePartListUnions(responsesToSend),
           {
             isContinuation: true,
           },
