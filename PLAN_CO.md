@@ -481,10 +481,19 @@ time ./packages/cli/dist/cli.js --provider cohere --model command-a-03-2025 "Wha
    - CohereContentGenerator returns false for this method
    - checkNextSpeaker now skips JSON mode check for providers that don't support it
 
-2. **Interactive Mode Tool Response Issue**
-   - Tool responses are not properly added to conversation history before next Cohere API call
-   - Causes "tool_call_ids did not have response messages" error
-   - Message reordering logic exists but timing issue prevents it from working
+2. **Interactive Mode Tool Response Issue** ✅ FIXED
+   - Root cause: Race condition where `isResponding` was set to false before tools completed
+   - Fixed by:
+     1. Tracking when tools are still running (validating, scheduled, executing, awaiting_approval)
+     2. Keeping `isResponding` true while tools are executing
+     3. Only setting `isResponding` false when all tools complete
+     4. Added useEffect to handle edge cases
+     5. Added `isProcessingToolResponsesRef` flag to prevent concurrent API calls
+     6. Ensured the flag is properly cleared in all code paths (try-catch, safety useEffect)
+   - Also kept safety check in CohereContentGenerator:
+     - `checkForOrphanedToolCalls()` method as additional protection
+     - Provides clear error message if timing issues still occur
+   - Result: Tool calls now work correctly in interactive mode
 
 3. **Shell Tool Directory Parameter Issue** ✅ FIXED
    - Cohere was generating absolute paths for directory parameter

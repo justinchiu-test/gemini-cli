@@ -61,6 +61,17 @@ export class CohereContentGenerator implements ContentGenerator {
   async generateContentStream(
     request: GenerateContentParameters,
   ): Promise<AsyncGenerator<GenerateContentResponse>> {
+    // Safety check for Cohere: ensure we don't have orphaned tool calls
+    // Check in the original Gemini format before conversion
+    const contents = request.contents as Content[];
+    if (this.checkForOrphanedToolCallsInContents(contents)) {
+      console.error('Blocking API call due to orphaned tool calls in original contents');
+      throw new Error(
+        'Cannot make API call: Previous tool calls do not have matching responses. ' +
+        'This usually indicates a timing issue in interactive mode. ' +
+        'Please ensure tool responses are added to the conversation history before continuing.'
+      );
+    }
     return this.doGenerateContentStream(request);
   }
 
@@ -283,6 +294,81 @@ export class CohereContentGenerator implements ContentGenerator {
     return false;
   }
 
+  private checkForOrphanedToolCalls(messages: Cohere.ChatMessageV2[]): boolean {
+    const toolCallIds = new Set<string>();
+    const toolResponseIds = new Set<string>();
+    
+    for (const msg of messages) {
+      if (msg.role === 'assistant' && (msg as any).toolCalls) {
+        const toolCalls = (msg as any).toolCalls;
+        for (const tc of toolCalls) {
+          toolCallIds.add(tc.id);
+        }
+      } else if (msg.role === 'tool') {
+        const toolResponseId = (msg as any).toolCallId;
+        toolResponseIds.add(toolResponseId);
+      }
+    }
+    
+    // Check if any tool calls don't have responses
+    for (const tcId of toolCallIds) {
+      if (!toolResponseIds.has(tcId)) {
+        console.warn(`Orphaned tool call detected: ${tcId} has no matching response`);
+        return true;
+      }
+    }
+    
+    return false;
+  }
+
+  private checkForOrphanedToolCallsInContents(contents: Content[]): boolean {
+    // Check if the last model message has function calls but no subsequent function responses
+    let lastModelMessageIndex = -1;
+    let lastModelHasFunctionCalls = false;
+    
+    // Find the last model message and check if it has function calls
+    for (let i = contents.length - 1; i >= 0; i--) {
+      if (contents[i].role === 'model') {
+        lastModelMessageIndex = i;
+        const parts = contents[i].parts;
+        if (parts) {
+          for (const part of parts) {
+            if (typeof part === 'object' && 'functionCall' in part && part.functionCall) {
+              lastModelHasFunctionCalls = true;
+              break;
+            }
+          }
+        }
+        break;
+      }
+    }
+    
+    // If last model message has function calls, check if there are any function responses after it
+    if (lastModelHasFunctionCalls && lastModelMessageIndex >= 0) {
+      let hasSubsequentFunctionResponse = false;
+      
+      for (let i = lastModelMessageIndex + 1; i < contents.length; i++) {
+        const parts = contents[i].parts;
+        if (parts) {
+          for (const part of parts) {
+            if (typeof part === 'object' && 'functionResponse' in part && part.functionResponse) {
+              hasSubsequentFunctionResponse = true;
+              break;
+            }
+          }
+        }
+        if (hasSubsequentFunctionResponse) break;
+      }
+      
+      if (!hasSubsequentFunctionResponse) {
+        console.warn('Orphaned tool calls detected: Last model message has function calls but no subsequent responses');
+        return true;
+      }
+    }
+    
+    return false;
+  }
+
   private convertToCohereChatMessages(request: GenerateContentParameters): Cohere.ChatMessageV2[] {
     const messages: Cohere.ChatMessageV2[] = [];
 
@@ -344,7 +430,10 @@ export class CohereContentGenerator implements ContentGenerator {
           } else if (typeof part === 'object' && 'functionResponse' in part && part.functionResponse) {
             hasFunctionResponses = true;
             const toolCallId = part.functionResponse.id || part.functionResponse.name || 'unknown';
-            // console.log('DEBUG: Processing function response with ID:', toolCallId);
+            if (process.env.DEBUG) {
+              console.log('DEBUG: Processing function response with ID:', toolCallId, 'name:', part.functionResponse.name);
+              console.log('DEBUG: Full functionResponse object:', JSON.stringify(part.functionResponse, null, 2));
+            }
             let responseContent = '';
             if (part.functionResponse.response) {
               if (typeof part.functionResponse.response === 'string') {
@@ -428,6 +517,15 @@ export class CohereContentGenerator implements ContentGenerator {
             }
             if (!found) {
               console.log(`WARNING: No tool response found for tool call ID: ${tcId}`);
+              // Additional debug info
+              if (process.env.DEBUG) {
+                console.log('Available tool responses:');
+                tempMessages.forEach((msg, idx) => {
+                  if (msg.type === 'tool_response') {
+                    console.log(`  - Index ${idx}: ${msg.data.toolCallId}`);
+                  }
+                });
+              }
             }
           }
         }
@@ -441,10 +539,23 @@ export class CohereContentGenerator implements ContentGenerator {
     }
 
     // Debug logging for conversation history issues
-    if (contents.length > 2) {
+    if (contents.length > 1 && process.env.DEBUG) {
       console.log('\n=== COHERE CONVERSATION HISTORY DEBUG ===');
       console.log('Raw Gemini contents:', contents.length, 'items');
       
+      // Log raw contents structure
+      contents.forEach((content, idx) => {
+        const partTypes = content.parts?.map(part => {
+          if (typeof part === 'string') return 'text';
+          if ('text' in part) return 'text';
+          if ('functionCall' in part && part.functionCall) return `functionCall(${part.functionCall.name})`;
+          if ('functionResponse' in part && part.functionResponse) return `functionResponse(${part.functionResponse.name})`;
+          return 'unknown';
+        }).join(', ') || 'no parts';
+        console.log(`  Gemini[${idx}] ${content.role}: [${partTypes}]`);
+      });
+      
+      console.log('\nConverted Cohere messages:');
       // Check for orphaned tool calls
       const assistantToolCalls = new Map<string, number>();
       const toolResponses = new Set<string>();
@@ -452,14 +563,15 @@ export class CohereContentGenerator implements ContentGenerator {
       messages.forEach((msg, idx) => {
         if (msg.role === 'assistant' && (msg as any).toolCalls) {
           const toolIds = (msg as any).toolCalls.map((tc: any) => tc.id);
-          console.log(`[${idx}] Assistant with tool_calls: ${toolIds.join(', ')}`);
+          console.log(`  Cohere[${idx}] Assistant with tool_calls: ${toolIds.join(', ')}`);
           toolIds.forEach((id: string) => assistantToolCalls.set(id, idx));
         } else if (msg.role === 'tool') {
           const toolId = (msg as any).toolCallId;
-          console.log(`[${idx}] Tool response for: ${toolId}`);
+          console.log(`  Cohere[${idx}] Tool response for: ${toolId}`);
           toolResponses.add(toolId);
         } else if (msg.role !== 'system') {
-          console.log(`[${idx}] ${msg.role}: ${msg.content ? 'text' : 'no content'}`);
+          const contentStr = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
+          console.log(`  Cohere[${idx}] ${msg.role}: ${contentStr ? contentStr.substring(0, 50) + '...' : 'no content'}`);
         }
       });
       

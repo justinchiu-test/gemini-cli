@@ -99,6 +99,7 @@ export const useGeminiStream = (
   const turnCancelledRef = useRef(false);
   const [isResponding, setIsResponding] = useState<boolean>(false);
   const [thought, setThought] = useState<ThoughtSummary | null>(null);
+  const isProcessingToolResponsesRef = useRef<boolean>(false);
   const [pendingHistoryItemRef, setPendingHistoryItem] =
     useStateAndRef<HistoryItemWithoutId | null>(null);
   const processedMemoryToolsRef = useRef<Set<string>>(new Set());
@@ -540,6 +541,14 @@ export const useGeminiStream = (
         !options?.isContinuation
       )
         return;
+      
+      // Prevent concurrent API calls while processing tool responses
+      if (isProcessingToolResponsesRef.current && !options?.isContinuation) {
+        if (config.getDebugMode()) {
+          console.log('DEBUG: Blocking submitQuery - still processing tool responses');
+        }
+        return;
+      }
 
       const userMessageTimestamp = Date.now();
       setShowHelp(false);
@@ -575,6 +584,17 @@ export const useGeminiStream = (
 
       setIsResponding(true);
       setInitError(null);
+      
+      if (config.getDebugMode()) {
+        console.log('DEBUG: submitQuery called with isContinuation:', options?.isContinuation);
+        console.log('DEBUG: isResponding set to true');
+        console.log('DEBUG: Number of running tools:', toolCalls.filter(tc => 
+          tc.status === 'validating' ||
+          tc.status === 'scheduled' ||
+          tc.status === 'executing' ||
+          tc.status === 'awaiting_approval'
+        ).length);
+      }
 
       try {
         const stream = geminiClient.sendMessageStream(
@@ -619,7 +639,34 @@ export const useGeminiStream = (
           );
         }
       } finally {
-        setIsResponding(false);
+        // Don't set isResponding to false if tools are still running
+        // It will be set to false when tools complete
+        const hasRunningTools = toolCalls.some(tc => 
+          tc.status === 'validating' ||
+          tc.status === 'scheduled' ||
+          tc.status === 'executing' ||
+          tc.status === 'awaiting_approval'
+        );
+        
+        if (config.getDebugMode()) {
+          console.log('DEBUG: submitQuery finally block, hasRunningTools:', hasRunningTools);
+          console.log('DEBUG: Tool statuses:', toolCalls.map(tc => ({ id: tc.request.callId, status: tc.status })));
+        }
+        
+        if (!hasRunningTools) {
+          setIsResponding(false);
+          if (config.getDebugMode()) {
+            console.log('DEBUG: isResponding set to false in finally block');
+          }
+        }
+        
+        // Clear the processing flag if this was a tool response continuation
+        if (options?.isContinuation) {
+          isProcessingToolResponsesRef.current = false;
+          if (config.getDebugMode()) {
+            console.log('DEBUG: Cleared isProcessingToolResponses flag');
+          }
+        }
       }
     },
     [
@@ -638,11 +685,15 @@ export const useGeminiStream = (
       startNewPrompt,
       getPromptCount,
       handleLoopDetectedEvent,
+      toolCalls,
     ],
   );
 
   const handleCompletedTools = useCallback(
     async (completedToolCallsFromScheduler: TrackedToolCall[]) => {
+      if (config.getDebugMode()) {
+        console.log('DEBUG: handleCompletedTools called, isResponding:', isResponding);
+      }
       if (isResponding) {
         return;
       }
@@ -699,6 +750,15 @@ export const useGeminiStream = (
       );
 
       if (geminiTools.length === 0) {
+        // No tools to submit, but check if we should set isResponding to false
+        if (!toolCalls.some(tc => 
+          tc.status === 'validating' ||
+          tc.status === 'scheduled' ||
+          tc.status === 'executing' ||
+          tc.status === 'awaiting_approval'
+        )) {
+          setIsResponding(false);
+        }
         return;
       }
 
@@ -755,21 +815,39 @@ export const useGeminiStream = (
         return;
       }
 
-      submitQuery(
-        mergePartListUnions(responsesToSend),
-        {
-          isContinuation: true,
-        },
-        prompt_ids[0],
-      );
+      // Set flag to prevent concurrent API calls
+      isProcessingToolResponsesRef.current = true;
+      if (config.getDebugMode()) {
+        console.log('DEBUG: Setting isProcessingToolResponses to true');
+      }
+
+      // Use try-catch to ensure flag is cleared even if submitQuery throws
+      try {
+        await submitQuery(
+          mergePartListUnions(responsesToSend),
+          {
+            isContinuation: true,
+          },
+          prompt_ids[0],
+        );
+      } catch (error) {
+        // Clear the flag on error
+        isProcessingToolResponsesRef.current = false;
+        if (config.getDebugMode()) {
+          console.log('DEBUG: Cleared isProcessingToolResponses flag due to error');
+        }
+        throw error;
+      }
     },
-    [
+  [
       isResponding,
       submitQuery,
       markToolsAsSubmitted,
       geminiClient,
       performMemoryRefresh,
       modelSwitchedFromQuotaError,
+      toolCalls,
+      config,
     ],
   );
 
@@ -777,6 +855,36 @@ export const useGeminiStream = (
     pendingHistoryItemRef.current,
     pendingToolCallGroupDisplay,
   ].filter((i) => i !== undefined && i !== null);
+
+  // Check if any tools are still running
+  const hasRunningTools = useMemo(() => {
+    return toolCalls.some(
+      (tc) =>
+        tc.status === 'validating' ||
+        tc.status === 'scheduled' ||
+        tc.status === 'executing' ||
+        tc.status === 'awaiting_approval'
+    );
+  }, [toolCalls]);
+
+  // When all tools complete and we're still marked as responding, set it to false
+  useEffect(() => {
+    if (isResponding && !hasRunningTools && toolCalls.length > 0) {
+      // All tools have completed
+      setIsResponding(false);
+    }
+  }, [isResponding, hasRunningTools, toolCalls.length]);
+
+  // Safety mechanism: Clear the processing flag if it gets stuck
+  useEffect(() => {
+    // If we're not responding and there are no running tools, the flag should be false
+    if (!isResponding && !hasRunningTools && isProcessingToolResponsesRef.current) {
+      if (config.getDebugMode()) {
+        console.log('DEBUG: Safety clearing isProcessingToolResponses flag');
+      }
+      isProcessingToolResponsesRef.current = false;
+    }
+  }, [isResponding, hasRunningTools, config]);
 
   useEffect(() => {
     const saveRestorableToolCalls = async () => {
