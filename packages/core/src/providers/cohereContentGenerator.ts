@@ -145,13 +145,16 @@ export class CohereContentGenerator implements ContentGenerator {
             // Initialize tool call from start event
             if (event.index !== undefined && event.delta?.message?.toolCalls) {
               const toolCall = event.delta.message.toolCalls;
+              // Use the ID from Cohere's response
+              const toolId = toolCall.id || `tool_${event.index}`;
               currentToolCalls[event.index] = {
-                id: toolCall.id || `tool_${event.index}`,
+                id: toolId,
                 function: {
                   name: toolCall.function?.name || '',
                   arguments: ''
                 }
               };
+              // console.log(`DEBUG: Tool call started with ID: ${toolId} for function: ${toolCall.function?.name}`);
             }
             break;
 
@@ -202,11 +205,31 @@ export class CohereContentGenerator implements ContentGenerator {
           case 'tool-call-end':
             // Tool call is complete, yield the response with function calls
             if (currentToolCalls.length > 0) {
-              const functionCalls = currentToolCalls.map(tc => ({
-                id: tc.id,  // Include the ID for proper tool response matching
-                name: tc.function?.name || '',
-                args: tc.function?.arguments ? JSON.parse(tc.function.arguments) : {},
-              }));
+              const functionCalls = currentToolCalls.map(tc => {
+                let args = tc.function?.arguments ? JSON.parse(tc.function.arguments) : {};
+                
+                // Special handling for shell tool - normalize directory parameter
+                if (tc.function?.name === 'run_shell_command' && args.directory) {
+                  // If Cohere provides an absolute path but it's within the current directory,
+                  // convert it to a relative path
+                  const dir = args.directory;
+                  if (dir.startsWith('/') && process.cwd && dir.startsWith(process.cwd())) {
+                    // Convert absolute path to relative
+                    args.directory = dir.substring(process.cwd().length + 1);
+                  } else if (dir === process.cwd()) {
+                    // If it's exactly the current directory, remove it
+                    delete args.directory;
+                  }
+                }
+                
+                const fc = {
+                  id: tc.id,  // Include the ID for proper tool response matching
+                  name: tc.function?.name || '',
+                  args: args,
+                };
+                // console.log('DEBUG: Yielding function call with ID:', fc.id, 'name:', fc.name);
+                return fc;
+              });
               // console.log('DEBUG: Tool calls completed:', JSON.stringify(functionCalls, null, 2));
               yield this.createStreamResponse(accumulatedText, functionCalls, usageMetadata);
             }
@@ -255,6 +278,11 @@ export class CohereContentGenerator implements ContentGenerator {
     throw new Error('Embedding is not supported for Cohere provider');
   }
 
+  supportsJsonMode(): boolean {
+    // Cohere doesn't support JSON mode / generateJson
+    return false;
+  }
+
   private convertToCohereChatMessages(request: GenerateContentParameters): Cohere.ChatMessageV2[] {
     const messages: Cohere.ChatMessageV2[] = [];
 
@@ -271,81 +299,181 @@ export class CohereContentGenerator implements ContentGenerator {
 
     // Convert contents to messages - contents is always Content[]
     const contents = request.contents as Content[];
-    for (const content of contents) {
+    
+    // Debug: Log raw contents structure
+    // if (contents.length > 1) {
+    //   console.log('\nDEBUG: Raw conversation history from Gemini:');
+    //   contents.forEach((content, idx) => {
+    //     const partTypes = content.parts?.map(part => {
+    //       if (typeof part === 'string') return 'text';
+    //       if ('text' in part) return 'text';
+    //       if ('functionCall' in part && part.functionCall) return `functionCall(${part.functionCall.name})`;
+    //       if ('functionResponse' in part && part.functionResponse) return `functionResponse(${part.functionResponse.name})`;
+    //       return 'unknown';
+    //     }).join(', ') || 'no parts';
+    //     console.log(`  ${idx}. ${content.role}: [${partTypes}]`);
+    //   });
+    // }
+    
+    // First pass: collect all messages and tool responses
+    const tempMessages: Array<{type: 'message' | 'tool_response', data: any}> = [];
+    
+    contents.forEach((content, contentIdx) => {
       const role = content.role === 'user' ? 'user' : 'assistant';
       
       // Check if this content has function calls
       let hasFunctionCalls = false;
       let toolCalls: any[] = [];
+      let hasFunctionResponses = false;
+      let functionResponses: any[] = [];
       
       if (content.parts) {
-        for (const part of content.parts) {
+        content.parts.forEach((part, partIdx) => {
           if (typeof part === 'object' && 'functionCall' in part && part.functionCall) {
             hasFunctionCalls = true;
+            // Generate a stable ID based on content index and part index
+            const toolCallId = part.functionCall.id || `${part.functionCall.name}_${contentIdx}_${partIdx}`;
             toolCalls.push({
-              id: part.functionCall.id || `${part.functionCall.name}_${Date.now()}`,
+              id: toolCallId,
               type: 'function',
               function: {
                 name: part.functionCall.name,
                 arguments: JSON.stringify(part.functionCall.args || {})
               }
             });
+          } else if (typeof part === 'object' && 'functionResponse' in part && part.functionResponse) {
+            hasFunctionResponses = true;
+            const toolCallId = part.functionResponse.id || part.functionResponse.name || 'unknown';
+            // console.log('DEBUG: Processing function response with ID:', toolCallId);
+            let responseContent = '';
+            if (part.functionResponse.response) {
+              if (typeof part.functionResponse.response === 'string') {
+                responseContent = part.functionResponse.response;
+              } else if (part.functionResponse.response.output) {
+                responseContent = String(part.functionResponse.response.output);
+              } else if (part.functionResponse.response.error) {
+                responseContent = `Error: ${part.functionResponse.response.error}`;
+              } else {
+                responseContent = JSON.stringify(part.functionResponse.response);
+              }
+            }
+            functionResponses.push({
+              role: 'tool',
+              toolCallId: toolCallId,
+              content: responseContent,
+            });
           }
-        }
+        });
       }
       
-      // If this is an assistant message with tool calls, format it properly
-      if (role === 'assistant' && hasFunctionCalls) {
-        const text = this.extractTextFromContent(content);
-        // For Cohere V2, assistant messages with tool calls should not have content
-        messages.push({
-          role: 'assistant',
-          toolCalls: toolCalls
+      // Handle different content types
+      if (hasFunctionResponses) {
+        // This is a user message containing function responses
+        // Add them as tool messages
+        for (const resp of functionResponses) {
+          tempMessages.push({ type: 'tool_response', data: resp });
+        }
+      } else if (role === 'assistant' && hasFunctionCalls) {
+        // Assistant message with tool calls
+        tempMessages.push({
+          type: 'message',
+          data: {
+            role: 'assistant',
+            toolCalls: toolCalls
+          }
         });
       } else {
         // Regular message
         const text = this.extractTextFromContent(content);
         if (text) {
-          messages.push({
-            role,
-            content: text,
+          tempMessages.push({
+            type: 'message',
+            data: {
+              role,
+              content: text,
+            }
           });
         }
       }
+    });
 
-      // Handle function responses in content
-      if (content.parts) {
-        for (const part of content.parts) {
-          if (typeof part === 'object' && 'functionResponse' in part && part.functionResponse) {
-            // console.log('DEBUG: Converting function response:', JSON.stringify(part.functionResponse, null, 2));
-            // Cohere expects tool responses to reference the original tool call ID
-            // The functionResponse should have an id that matches the original tool call
-            const toolCallId = part.functionResponse.id || part.functionResponse.name || 'unknown';
-            // Extract the output or error from the response
-            let content = '';
-            if (part.functionResponse.response) {
-              if (typeof part.functionResponse.response === 'string') {
-                content = part.functionResponse.response;
-              } else if (part.functionResponse.response.output) {
-                content = String(part.functionResponse.response.output);
-              } else if (part.functionResponse.response.error) {
-                content = `Error: ${part.functionResponse.response.error}`;
-              } else {
-                content = JSON.stringify(part.functionResponse.response);
+    // Second pass: Build final message array with proper ordering
+    // Track which tool responses have been added
+    const addedToolResponses = new Set<string>();
+    
+    for (let i = 0; i < tempMessages.length; i++) {
+      const current = tempMessages[i];
+      
+      if (current.type === 'message') {
+        messages.push(current.data);
+        
+        // If this is an assistant message with tool calls, we MUST add tool responses immediately
+        if (current.data.role === 'assistant' && current.data.toolCalls) {
+          const toolCallIds = current.data.toolCalls.map((tc: any) => tc.id);
+          
+          // Find ALL matching tool responses in the entire message list
+          for (const tcId of toolCallIds) {
+            let found = false;
+            // Search through all temp messages for this tool response
+            for (let j = 0; j < tempMessages.length; j++) {
+              const candidate = tempMessages[j];
+              if (candidate.type === 'tool_response' && 
+                  candidate.data.toolCallId === tcId &&
+                  !addedToolResponses.has(tcId)) {
+                messages.push(candidate.data);
+                addedToolResponses.add(tcId);
+                found = true;
+                break; // Found the response for this ID
               }
             }
-            
-            messages.push({
-              role: 'tool',
-              toolCallId: toolCallId,
-              content: content,
-            });
+            if (!found) {
+              console.log(`WARNING: No tool response found for tool call ID: ${tcId}`);
+            }
           }
+        }
+      } else if (current.type === 'tool_response') {
+        // Only add if not already added
+        if (!addedToolResponses.has(current.data.toolCallId)) {
+          messages.push(current.data);
+          addedToolResponses.add(current.data.toolCallId);
         }
       }
     }
 
-    // console.log('DEBUG: Converted messages:', JSON.stringify(messages, null, 2));
+    // Debug logging for conversation history issues
+    if (contents.length > 2) {
+      console.log('\n=== COHERE CONVERSATION HISTORY DEBUG ===');
+      console.log('Raw Gemini contents:', contents.length, 'items');
+      
+      // Check for orphaned tool calls
+      const assistantToolCalls = new Map<string, number>();
+      const toolResponses = new Set<string>();
+      
+      messages.forEach((msg, idx) => {
+        if (msg.role === 'assistant' && (msg as any).toolCalls) {
+          const toolIds = (msg as any).toolCalls.map((tc: any) => tc.id);
+          console.log(`[${idx}] Assistant with tool_calls: ${toolIds.join(', ')}`);
+          toolIds.forEach((id: string) => assistantToolCalls.set(id, idx));
+        } else if (msg.role === 'tool') {
+          const toolId = (msg as any).toolCallId;
+          console.log(`[${idx}] Tool response for: ${toolId}`);
+          toolResponses.add(toolId);
+        } else if (msg.role !== 'system') {
+          console.log(`[${idx}] ${msg.role}: ${msg.content ? 'text' : 'no content'}`);
+        }
+      });
+      
+      // Check for missing responses
+      console.log('\nTool call analysis:');
+      assistantToolCalls.forEach((idx, toolId) => {
+        if (!toolResponses.has(toolId)) {
+          console.log(`  ❌ MISSING RESPONSE for tool call: ${toolId} at position ${idx}`);
+        } else {
+          console.log(`  ✓ Found response for: ${toolId}`);
+        }
+      });
+      console.log('=== END DEBUG ===\n');
+    }
     return messages;
   }
 

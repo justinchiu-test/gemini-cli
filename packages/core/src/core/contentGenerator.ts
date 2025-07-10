@@ -37,6 +37,12 @@ export interface ContentGenerator {
   embedContent(request: EmbedContentParameters): Promise<EmbedContentResponse>;
 
   getTier?(): Promise<UserTierId | undefined>;
+
+  /**
+   * Indicates whether this content generator supports JSON mode / generateJson.
+   * Optional method - if not implemented, assumed to be true for backward compatibility.
+   */
+  supportsJsonMode?(): boolean;
 }
 
 export enum AuthType {

@@ -473,23 +473,35 @@ time ./packages/cli/dist/cli.js --provider cohere --model command-a-03-2025 "Wha
    - Hardcoded Cohere model selection to use `command-a-03-2025` for production
    - Model is correctly set when using `--provider cohere` flag
 
-### Ready to Test! 🎉
-The Cohere integration is now ready for testing:
+### Outstanding Issues to Fix 🔧
+
+1. **generateJson Compatibility Issue** ✅ FIXED
+   - The "next speaker checker" feature uses `generateJson` which Cohere doesn't support
+   - Added `supportsJsonMode()` method to ContentGenerator interface
+   - CohereContentGenerator returns false for this method
+   - checkNextSpeaker now skips JSON mode check for providers that don't support it
+
+2. **Interactive Mode Tool Response Issue**
+   - Tool responses are not properly added to conversation history before next Cohere API call
+   - Causes "tool_call_ids did not have response messages" error
+   - Message reordering logic exists but timing issue prevents it from working
+
+3. **Shell Tool Directory Parameter Issue** ✅ FIXED
+   - Cohere was generating absolute paths for directory parameter
+   - Shell tool expects relative paths or no directory parameter
+   - Added parameter normalization in CohereContentGenerator to convert absolute paths to relative
+
+### Ready to Test After Fixes! 🎉
+Once the above issues are resolved:
 ```bash
 # Set API key
 export COHERE_API_KEY="your-api-key"
-# or for staging
-export CO_API_KEY_STAGING="your-staging-key"
 
-# Test with Cohere provider
-./packages/cli/dist/cli.js --provider cohere "Hello, what is 2+2?"
-./packages/cli/dist/cli.js --provider coherestaging "Tell me a joke"
+# Test interactive mode
+node packages/cli/dist/index.js --provider cohere
 
-# Test with specific model
-./packages/cli/dist/cli.js --provider cohere --model command-a-03-2025 "Explain AI"
-
-# Compare with Gemini (default)
-./packages/cli/dist/cli.js "What is 2+2?"
+# Test non-interactive mode
+node packages/cli/dist/index.js --provider cohere -p "List files"
 ```
 
 ## Success Criteria

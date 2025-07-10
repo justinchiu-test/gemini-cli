@@ -128,6 +128,13 @@ export async function checkNextSpeaker(
   ];
 
   try {
+    // Check if the content generator supports JSON mode
+    const contentGenerator = geminiClient.getContentGenerator();
+    if (contentGenerator.supportsJsonMode && !contentGenerator.supportsJsonMode()) {
+      // Provider doesn't support JSON mode, skip next speaker check
+      return null;
+    }
+
     const parsedResponse = (await geminiClient.generateJson(
       contents,
       RESPONSE_SCHEMA,
