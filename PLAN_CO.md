@@ -482,7 +482,9 @@ time ./packages/cli/dist/cli.js --provider cohere --model command-a-03-2025 "Wha
    - checkNextSpeaker now skips JSON mode check for providers that don't support it
 
 2. **Interactive Mode Tool Response Issue** ✅ FIXED
-   - Root cause: Race condition where `isResponding` was set to false before tools completed
+   - Root cause: Two issues combined:
+     1. Race condition where `isResponding` was set to false before tools completed
+     2. Tool responses weren't being added to conversation history before API call
    - Fixed by:
      1. Tracking when tools are still running (validating, scheduled, executing, awaiting_approval)
      2. Keeping `isResponding` true while tools are executing
@@ -490,6 +492,10 @@ time ./packages/cli/dist/cli.js --provider cohere --model command-a-03-2025 "Wha
      4. Added useEffect to handle edge cases
      5. Added `isProcessingToolResponsesRef` flag to prevent concurrent API calls
      6. Ensured the flag is properly cleared in all code paths (try-catch, safety useEffect)
+     7. **Critical fix**: Adding tool responses to geminiClient history before continuation query
+        - Cohere requires tool responses to be in the conversation history
+        - Now calling `geminiClient.addHistory()` with tool responses before `submitQuery`
+        - Sending empty array to `submitQuery` since responses are already in history
    - Also kept safety check in CohereContentGenerator:
      - `checkForOrphanedToolCalls()` method as additional protection
      - Provides clear error message if timing issues still occur

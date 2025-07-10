@@ -815,6 +815,36 @@ export const useGeminiStream = (
         return;
       }
 
+      // Add tool responses to history before sending the continuation query
+      // This is critical for Cohere which needs tool responses in the conversation history
+      if (geminiClient) {
+        const mergedResponses = mergePartListUnions(responsesToSend);
+        const responseParts: Part[] = [];
+        
+        // Convert PartListUnion to Part[]
+        if (Array.isArray(mergedResponses)) {
+          for (const response of mergedResponses) {
+            if (Array.isArray(response)) {
+              responseParts.push(...response);
+            } else if (typeof response === 'string') {
+              responseParts.push({ text: response });
+            } else {
+              responseParts.push(response);
+            }
+          }
+        } else if (typeof mergedResponses === 'string') {
+          responseParts.push({ text: mergedResponses });
+        } else {
+          responseParts.push(mergedResponses);
+        }
+        
+        // Add to history as a user message with function responses
+        geminiClient.addHistory({
+          role: 'user',
+          parts: responseParts,
+        });
+      }
+
       // Set flag to prevent concurrent API calls
       isProcessingToolResponsesRef.current = true;
       if (config.getDebugMode()) {
@@ -823,8 +853,9 @@ export const useGeminiStream = (
 
       // Use try-catch to ensure flag is cleared even if submitQuery throws
       try {
+        // Now we can send an empty continuation query since the responses are in history
         await submitQuery(
-          mergePartListUnions(responsesToSend),
+          [],
           {
             isContinuation: true,
           },
