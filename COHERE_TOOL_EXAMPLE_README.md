@@ -43,7 +43,7 @@ If using the staging environment, you'll need to modify the example:
 // In cohere-v2-tools-simple.ts, change:
 const client = new CohereClientV2({
     token: process.env.CO_API_KEY_STAGING!,
-    baseURL: "https://stg.api.cohere.ai/compatibility/v1"
+    baseURL: "https://stg.api.cohere.ai/v2"
 });
 
 // Also change the model:

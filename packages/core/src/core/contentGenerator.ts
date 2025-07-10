@@ -109,6 +109,7 @@ export function createContentGeneratorConfig(
   if (authType === AuthType.USE_COHERE && cohereApiKey) {
     contentGeneratorConfig.apiKey = cohereApiKey;
     contentGeneratorConfig.vertexai = false;
+    contentGeneratorConfig.model = 'command-a-03-2025';
     
     return contentGeneratorConfig;
   }
@@ -116,6 +117,7 @@ export function createContentGeneratorConfig(
   if (authType === AuthType.USE_COHERE_STAGING && cohereStagingApiKey) {
     contentGeneratorConfig.apiKey = cohereStagingApiKey;
     contentGeneratorConfig.vertexai = false;
+    contentGeneratorConfig.model = 'c3-sweep-ecsydrkq-690h-fp16';
     
     return contentGeneratorConfig;
   }
@@ -163,7 +165,6 @@ export async function createContentGenerator(
     return new CohereContentGenerator({
       apiKey: config.apiKey,
       model: config.model || 'command-a-03-2025',
-      baseURL: 'https://api.cohere.ai/compatibility/v1',
     });
   }
 
@@ -171,7 +172,7 @@ export async function createContentGenerator(
     return new CohereContentGenerator({
       apiKey: config.apiKey,
       model: config.model || 'c3-sweep-ecsydrkq-690h-fp16',
-      baseURL: 'https://stg.api.cohere.ai/compatibility/v1',
+      baseURL: 'https://stg.api.cohere.ai/v2',
     });
   }
 

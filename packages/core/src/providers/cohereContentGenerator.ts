@@ -68,23 +68,54 @@ export class CohereContentGenerator implements ContentGenerator {
   ): AsyncGenerator<GenerateContentResponse> {
     try {
       const messages = this.convertToCohereChatMessages(request);
-      const tools = request.config?.tools?.flatMap(tool => {
-        if ('functionDeclarations' in tool && Array.isArray(tool.functionDeclarations)) {
-          return tool.functionDeclarations.map(fn => this.convertToCohereTool(fn));
+      let tools: Cohere.ToolV2[] = [];
+      if (request.config?.tools) {
+        console.log('DEBUG: Raw tools from request:', JSON.stringify(request.config.tools, null, 2));
+        for (const tool of request.config.tools) {
+          console.log('DEBUG: Processing tool:', JSON.stringify(tool, null, 2));
+          if ('functionDeclarations' in tool && Array.isArray(tool.functionDeclarations)) {
+            console.log('DEBUG: Tool has functionDeclarations');
+            tools.push(...tool.functionDeclarations.map(fn => this.convertToCohereTool(fn)));
+          } else {
+            console.log('DEBUG: Tool is direct function');
+            tools.push(this.convertToCohereTool(tool));
+          }
         }
-        return [this.convertToCohereTool(tool)];
-      });
+        console.log('DEBUG: Final converted tools:', JSON.stringify(tools, null, 2));
+      }
       
-      const stream = await this.client.chatStream({
+      // Build request parameters, filtering out undefined values
+      const requestParams: any = {
         model: this.model,
         messages,
-        tools,
-        temperature: request.config?.temperature,
-        maxTokens: request.config?.maxOutputTokens,
-        stopSequences: request.config?.stopSequences,
-        p: request.config?.topP,
-        k: request.config?.topK,
-      });
+      };
+
+      // Only add tools if they exist and are not empty
+      // Temporarily limit to first 3 tools to test
+      if (tools && tools.length > 0) {
+        requestParams.tools = tools.slice(0, 3);
+        console.log('DEBUG: Limited tools count to 3:', tools.length);
+      }
+
+      // Only add optional parameters if they are defined
+      if (request.config?.temperature !== undefined) {
+        requestParams.temperature = request.config.temperature;
+      }
+      if (request.config?.maxOutputTokens !== undefined) {
+        requestParams.maxTokens = request.config.maxOutputTokens;
+      }
+      if (request.config?.stopSequences !== undefined && request.config.stopSequences.length > 0) {
+        requestParams.stopSequences = request.config.stopSequences;
+      }
+      if (request.config?.topP !== undefined) {
+        requestParams.p = request.config.topP;
+      }
+      if (request.config?.topK !== undefined) {
+        requestParams.k = request.config.topK;
+      }
+
+
+      const stream = await this.client.chatStream(requestParams);
 
       let accumulatedText = '';
       let currentToolCalls: Cohere.ToolCallV2[] = [];
@@ -253,15 +284,43 @@ export class CohereContentGenerator implements ContentGenerator {
 
   private convertToCohereTool(tool: any): Cohere.ToolV2 {
     // Handle both direct tool objects and function declarations
-    const functionDecl = tool.functionDeclaration || tool;
+    const functionDecl = tool.functionDeclaration || tool.function || tool;
+    
+    // Convert the parameters to ensure Cohere compatibility
+    const parameters = this.convertParametersForCohere(functionDecl.parameters);
+    
     return {
       type: 'function',
       function: {
         name: functionDecl.name,
         description: functionDecl.description,
-        parameters: functionDecl.parameters,
+        parameters,
       },
     };
+  }
+
+  private convertParametersForCohere(params: any): any {
+    if (!params) return params;
+    
+    // Recursively convert type fields from uppercase to lowercase
+    const convertTypes = (obj: any): any => {
+      if (Array.isArray(obj)) {
+        return obj.map(convertTypes);
+      } else if (obj && typeof obj === 'object') {
+        const converted: any = {};
+        for (const [key, value] of Object.entries(obj)) {
+          if (key === 'type' && typeof value === 'string') {
+            converted[key] = value.toLowerCase();
+          } else {
+            converted[key] = convertTypes(value);
+          }
+        }
+        return converted;
+      }
+      return obj;
+    };
+    
+    return convertTypes(params);
   }
 
   private createStreamResponse(
