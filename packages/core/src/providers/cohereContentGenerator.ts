@@ -116,6 +116,7 @@ export class CohereContentGenerator implements ContentGenerator {
       let usageMetadata: UsageMetadata | undefined;
 
       for await (const event of stream) {
+        // console.log('DEBUG: Event type:', event.type);
         switch (event.type) {
           case 'message-start':
             // Initialize usage metadata if available
@@ -130,24 +131,69 @@ export class CohereContentGenerator implements ContentGenerator {
             }
             break;
 
+          case 'tool-plan-delta':
+            // Cohere sends a natural language plan before tool calls
+            if (event.delta?.message?.toolPlan) {
+              const planText = event.delta.message.toolPlan;
+              accumulatedText += planText;
+              yield this.createStreamResponse(planText, [], usageMetadata);
+            }
+            break;
+
           case 'tool-call-start':
-            // Tool call started
+            // console.log('DEBUG: Tool call started:', JSON.stringify(event, null, 2));
+            // Initialize tool call from start event
+            if (event.index !== undefined && event.delta?.message?.toolCalls) {
+              const toolCall = event.delta.message.toolCalls;
+              currentToolCalls[event.index] = {
+                id: toolCall.id || `tool_${event.index}`,
+                function: {
+                  name: toolCall.function?.name || '',
+                  arguments: ''
+                }
+              };
+            }
             break;
 
           case 'tool-call-delta':
             // Update the arguments of the current tool call
+            // console.log('DEBUG: Tool call delta:', JSON.stringify(event, null, 2));
             if (event.delta && typeof event.delta === 'object') {
               const toolCallDelta = event.delta as any;
-              if (toolCallDelta.toolCall) {
-                // Find or create the tool call
-                const existingIndex = currentToolCalls.findIndex(tc => tc.id === toolCallDelta.toolCall.id);
-                if (existingIndex >= 0) {
-                  const tc = currentToolCalls[existingIndex];
-                  if (tc.function && toolCallDelta.toolCall.function?.arguments) {
-                    tc.function.arguments = (tc.function.arguments || '') + toolCallDelta.toolCall.function.arguments;
+              if (toolCallDelta.message?.toolCalls) {
+                // Process the tool calls from the delta
+                const deltaToolCall = toolCallDelta.message.toolCalls;
+                if (deltaToolCall.id || deltaToolCall.function) {
+                  // Find or create the tool call
+                  const existingIndex = currentToolCalls.findIndex(tc => tc.id === (deltaToolCall.id || currentToolCalls[event.index || 0]?.id));
+                  if (existingIndex >= 0) {
+                    const tc = currentToolCalls[existingIndex];
+                    if (tc.function && deltaToolCall.function?.arguments) {
+                      tc.function.arguments = (tc.function.arguments || '') + deltaToolCall.function.arguments;
+                    }
+                  } else if (event.index !== undefined) {
+                    // Initialize the tool call at the given index
+                    if (!currentToolCalls[event.index]) {
+                      currentToolCalls[event.index] = {
+                        id: deltaToolCall.id || `tool_${event.index}`,
+                        function: {
+                          name: deltaToolCall.function?.name || '',
+                          arguments: deltaToolCall.function?.arguments || ''
+                        }
+                      };
+                    } else {
+                      // Update existing tool call
+                      const tc = currentToolCalls[event.index];
+                      if (tc.function) {
+                        if (deltaToolCall.function?.name) {
+                          tc.function.name = deltaToolCall.function.name;
+                        }
+                        if (deltaToolCall.function?.arguments) {
+                          tc.function.arguments = (tc.function.arguments || '') + deltaToolCall.function.arguments;
+                        }
+                      }
+                    }
                   }
-                } else {
-                  currentToolCalls.push(toolCallDelta.toolCall);
                 }
               }
             }
@@ -157,9 +203,11 @@ export class CohereContentGenerator implements ContentGenerator {
             // Tool call is complete, yield the response with function calls
             if (currentToolCalls.length > 0) {
               const functionCalls = currentToolCalls.map(tc => ({
+                id: tc.id,  // Include the ID for proper tool response matching
                 name: tc.function?.name || '',
                 args: tc.function?.arguments ? JSON.parse(tc.function.arguments) : {},
               }));
+              // console.log('DEBUG: Tool calls completed:', JSON.stringify(functionCalls, null, 2));
               yield this.createStreamResponse(accumulatedText, functionCalls, usageMetadata);
             }
             break;
@@ -225,29 +273,79 @@ export class CohereContentGenerator implements ContentGenerator {
     const contents = request.contents as Content[];
     for (const content of contents) {
       const role = content.role === 'user' ? 'user' : 'assistant';
-      const text = this.extractTextFromContent(content);
       
-      if (text) {
+      // Check if this content has function calls
+      let hasFunctionCalls = false;
+      let toolCalls: any[] = [];
+      
+      if (content.parts) {
+        for (const part of content.parts) {
+          if (typeof part === 'object' && 'functionCall' in part && part.functionCall) {
+            hasFunctionCalls = true;
+            toolCalls.push({
+              id: part.functionCall.id || `${part.functionCall.name}_${Date.now()}`,
+              type: 'function',
+              function: {
+                name: part.functionCall.name,
+                arguments: JSON.stringify(part.functionCall.args || {})
+              }
+            });
+          }
+        }
+      }
+      
+      // If this is an assistant message with tool calls, format it properly
+      if (role === 'assistant' && hasFunctionCalls) {
+        const text = this.extractTextFromContent(content);
+        // For Cohere V2, assistant messages with tool calls should not have content
         messages.push({
-          role,
-          content: text,
+          role: 'assistant',
+          toolCalls: toolCalls
         });
+      } else {
+        // Regular message
+        const text = this.extractTextFromContent(content);
+        if (text) {
+          messages.push({
+            role,
+            content: text,
+          });
+        }
       }
 
       // Handle function responses in content
       if (content.parts) {
         for (const part of content.parts) {
           if (typeof part === 'object' && 'functionResponse' in part && part.functionResponse) {
+            // console.log('DEBUG: Converting function response:', JSON.stringify(part.functionResponse, null, 2));
+            // Cohere expects tool responses to reference the original tool call ID
+            // The functionResponse should have an id that matches the original tool call
+            const toolCallId = part.functionResponse.id || part.functionResponse.name || 'unknown';
+            // Extract the output or error from the response
+            let content = '';
+            if (part.functionResponse.response) {
+              if (typeof part.functionResponse.response === 'string') {
+                content = part.functionResponse.response;
+              } else if (part.functionResponse.response.output) {
+                content = String(part.functionResponse.response.output);
+              } else if (part.functionResponse.response.error) {
+                content = `Error: ${part.functionResponse.response.error}`;
+              } else {
+                content = JSON.stringify(part.functionResponse.response);
+              }
+            }
+            
             messages.push({
               role: 'tool',
-              toolCallId: part.functionResponse.name || 'unknown',
-              content: JSON.stringify(part.functionResponse.response),
+              toolCallId: toolCallId,
+              content: content,
             });
           }
         }
       }
     }
 
+    // console.log('DEBUG: Converted messages:', JSON.stringify(messages, null, 2));
     return messages;
   }
 
