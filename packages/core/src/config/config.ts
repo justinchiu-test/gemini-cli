@@ -333,6 +333,10 @@ export class Config {
     return this.contentGeneratorConfig?.model || this.model;
   }
 
+  getProvider(): string | undefined {
+    return this.provider;
+  }
+
   setModel(newModel: string): void {
     if (this.contentGeneratorConfig) {
       this.contentGeneratorConfig.model = newModel;

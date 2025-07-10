@@ -106,6 +106,47 @@ export async function main() {
 
   const argv = await parseArguments();
   const extensions = loadExtensions(workspaceRoot);
+
+  // Check if a provider was specified via CLI flag - this overrides settings
+  const yargs = await import('yargs/yargs');
+  const { hideBin } = await import('yargs/helpers');
+  const argv = await yargs.default(hideBin(process.argv))
+    .option('provider', {
+      type: 'string',
+      choices: ['gemini', 'cohere', 'coherestaging'],
+    })
+    .help(false)
+    .version(false)
+    .parse();
+  if (argv.provider) {
+    let authType: AuthType | undefined;
+    switch (argv.provider) {
+      case 'cohere':
+        authType = AuthType.USE_COHERE;
+        break;
+      case 'coherestaging':
+        authType = AuthType.USE_COHERE_STAGING;
+        break;
+      case 'gemini':
+        authType = AuthType.USE_GEMINI;
+        break;
+    }
+    if (authType) {
+      settings.setValue(SettingScope.User, 'selectedAuthType', authType);
+    }
+  } else {
+    // Set a default auth type if one isn't set and no provider specified
+    if (!settings.merged.selectedAuthType) {
+      if (process.env.CLOUD_SHELL === 'true') {
+        settings.setValue(
+          SettingScope.User,
+          'selectedAuthType',
+          AuthType.CLOUD_SHELL,
+        );
+      }
+    }
+  }
+
   const config = await loadCliConfig(
     settings.merged,
     extensions,
@@ -126,17 +167,6 @@ export async function main() {
       console.log(`- ${extension.config.name}`);
     }
     process.exit(0);
-  }
-
-  // Set a default auth type if one isn't set.
-  if (!settings.merged.selectedAuthType) {
-    if (process.env.CLOUD_SHELL === 'true') {
-      settings.setValue(
-        SettingScope.User,
-        'selectedAuthType',
-        AuthType.CLOUD_SHELL,
-      );
-    }
   }
 
   setMaxSizedBoxDebugging(config.getDebugMode());

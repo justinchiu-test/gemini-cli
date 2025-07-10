@@ -19,6 +19,7 @@ import {
   TelemetryTarget,
   MCPServerConfig,
   IDE_SERVER_NAME,
+  AuthType,
 } from '@google/gemini-cli-core';
 import { Settings } from './settings.js';
 

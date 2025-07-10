@@ -38,5 +38,19 @@ export const validateAuthMethod = (authMethod: string): string | null => {
     return null;
   }
 
+  if (authMethod === AuthType.USE_COHERE) {
+    if (!process.env.COHERE_API_KEY) {
+      return 'COHERE_API_KEY environment variable not found. Add that to your environment and try again (no reload needed if using .env)!';
+    }
+    return null;
+  }
+
+  if (authMethod === AuthType.USE_COHERE_STAGING) {
+    if (!process.env.CO_API_KEY_STAGING) {
+      return 'CO_API_KEY_STAGING environment variable not found. Add that to your environment and try again (no reload needed if using .env)!';
+    }
+    return null;
+  }
+
   return 'Invalid auth method selected.';
 };
