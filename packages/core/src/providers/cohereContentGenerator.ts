@@ -18,6 +18,7 @@ import type {
   FunctionCall,
   FunctionResponse,
   UsageMetadata,
+  FinishReason,
 } from '@google/genai';
 import type { ContentGenerator } from '../core/contentGenerator.js';
 
@@ -70,18 +71,13 @@ export class CohereContentGenerator implements ContentGenerator {
       const messages = this.convertToCohereChatMessages(request);
       let tools: Cohere.ToolV2[] = [];
       if (request.config?.tools) {
-        console.log('DEBUG: Raw tools from request:', JSON.stringify(request.config.tools, null, 2));
         for (const tool of request.config.tools) {
-          console.log('DEBUG: Processing tool:', JSON.stringify(tool, null, 2));
           if ('functionDeclarations' in tool && Array.isArray(tool.functionDeclarations)) {
-            console.log('DEBUG: Tool has functionDeclarations');
             tools.push(...tool.functionDeclarations.map(fn => this.convertToCohereTool(fn)));
           } else {
-            console.log('DEBUG: Tool is direct function');
             tools.push(this.convertToCohereTool(tool));
           }
         }
-        console.log('DEBUG: Final converted tools:', JSON.stringify(tools, null, 2));
       }
       
       // Build request parameters, filtering out undefined values
@@ -91,10 +87,8 @@ export class CohereContentGenerator implements ContentGenerator {
       };
 
       // Only add tools if they exist and are not empty
-      // Temporarily limit to first 3 tools to test
       if (tools && tools.length > 0) {
-        requestParams.tools = tools.slice(0, 3);
-        console.log('DEBUG: Limited tools count to 3:', tools.length);
+        requestParams.tools = tools;
       }
 
       // Only add optional parameters if they are defined
@@ -129,8 +123,10 @@ export class CohereContentGenerator implements ContentGenerator {
 
           case 'content-delta':
             if (event.delta?.message?.content?.text) {
-              accumulatedText += event.delta.message.content.text;
-              yield this.createStreamResponse(accumulatedText, [], usageMetadata);
+              const deltaText = event.delta.message.content.text;
+              accumulatedText += deltaText;
+              // Yield only the delta text, not accumulated
+              yield this.createStreamResponse(deltaText, [], usageMetadata);
             }
             break;
 
@@ -172,15 +168,9 @@ export class CohereContentGenerator implements ContentGenerator {
             // Final usage metadata
             if (event.delta?.usage) {
               usageMetadata = this.convertUsageMetadata(event.delta.usage);
+              // Only yield usage metadata update, not duplicate content
+              yield this.createStreamResponse('', [], usageMetadata);
             }
-            // Yield final response
-            yield this.createStreamResponse(accumulatedText, 
-              currentToolCalls.map(tc => ({
-                name: tc.function?.name || '',
-                args: tc.function?.arguments ? JSON.parse(tc.function.arguments) : {},
-              })), 
-              usageMetadata
-            );
             break;
         }
       }
@@ -302,14 +292,20 @@ export class CohereContentGenerator implements ContentGenerator {
   private convertParametersForCohere(params: any): any {
     if (!params) return params;
     
-    // Recursively convert type fields from uppercase to lowercase
+    // Recursively convert and clean parameters for Cohere compatibility
     const convertTypes = (obj: any): any => {
       if (Array.isArray(obj)) {
         return obj.map(convertTypes);
       } else if (obj && typeof obj === 'object') {
         const converted: any = {};
         for (const [key, value] of Object.entries(obj)) {
+          // Skip properties that Cohere doesn't support
+          if (key === 'minLength' || key === 'minItems' || key === 'default') {
+            continue;
+          }
+          
           if (key === 'type' && typeof value === 'string') {
+            // Convert types to lowercase
             converted[key] = value.toLowerCase();
           } else {
             converted[key] = convertTypes(value);
@@ -338,11 +334,25 @@ export class CohereContentGenerator implements ContentGenerator {
       parts.push(...functionCalls.map(fc => ({ functionCall: fc })));
     }
 
-    // Return a simple response structure that matches GenerateContentResponse
-    return {
+    // Return a GenerateContentResponse with all required properties
+    const response: GenerateContentResponse = {
+      candidates: [{
+        content: {
+          role: 'model',
+          parts: parts
+        },
+        finishReason: 'STOP' as FinishReason,
+        index: 0
+      }],
       text: text || '',
       functionCalls: functionCalls.length > 0 ? functionCalls : undefined,
-    } as GenerateContentResponse;
+      data: undefined,
+      executableCode: undefined,
+      codeExecutionResult: undefined,
+      usageMetadata: usageMetadata
+    };
+    
+    return response;
   }
 
   private convertUsageMetadata(cohereUsage: any): UsageMetadata {

@@ -189,16 +189,20 @@ export async function main() {
     const sandboxConfig = config.getSandbox();
     if (sandboxConfig) {
       if (settings.merged.selectedAuthType) {
-        // Validate authentication here because the sandbox will interfere with the Oauth2 web redirect.
-        try {
-          const err = validateAuthMethod(settings.merged.selectedAuthType);
-          if (err) {
-            throw new Error(err);
+        // Skip authentication for Cohere providers
+        if (settings.merged.selectedAuthType !== AuthType.USE_COHERE && 
+            settings.merged.selectedAuthType !== AuthType.USE_COHERE_STAGING) {
+          // Validate authentication here because the sandbox will interfere with the Oauth2 web redirect.
+          try {
+            const err = validateAuthMethod(settings.merged.selectedAuthType);
+            if (err) {
+              throw new Error(err);
+            }
+            await config.refreshAuth(settings.merged.selectedAuthType);
+          } catch (err) {
+            console.error('Error authenticating:', err);
+            process.exit(1);
           }
-          await config.refreshAuth(settings.merged.selectedAuthType);
-        } catch (err) {
-          console.error('Error authenticating:', err);
-          process.exit(1);
         }
       }
       await start_sandbox(sandboxConfig, memoryArgs);

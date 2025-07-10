@@ -459,6 +459,20 @@ time ./packages/cli/dist/cli.js --provider cohere --model command-a-03-2025 "Wha
 4. **Phase 4: CLI Updates** - Added --provider flag and provider configuration
 5. **Phase 5: Testing & Documentation** - Created comprehensive tests and documentation
 
+### Recent Fixes Applied
+1. **Authentication Issue** - Fixed Google OAuth being triggered when using Cohere provider
+   - Modified `packages/cli/src/gemini.tsx` to skip authentication for Cohere providers
+   - Cohere providers now correctly use API key authentication only
+
+2. **Tool Schema Compatibility** - Fixed 400 BadRequestError from Cohere API
+   - Identified that Cohere doesn't support certain JSON schema properties
+   - Modified `convertParametersForCohere()` to remove unsupported properties: `minLength`, `minItems`, `default`
+   - Tools now work correctly with Cohere API
+
+3. **Model Selection** - Fixed to use correct Cohere models
+   - Hardcoded Cohere model selection to use `command-a-03-2025` for production
+   - Model is correctly set when using `--provider cohere` flag
+
 ### Ready to Test! 🎉
 The Cohere integration is now ready for testing:
 ```bash
