@@ -41,7 +41,7 @@ export class CohereContentGenerator implements ContentGenerator {
     }
     
     const clientConfig: any = {
-      token: config.apiKey,
+      apiKey: config.apiKey,
     };
     
     if (config.baseURL) {
@@ -51,7 +51,7 @@ export class CohereContentGenerator implements ContentGenerator {
     if (process.env.DEBUG) {
       console.log('[DEBUG] Creating CohereClientV2 with config:', {
         ...clientConfig,
-        token: clientConfig.token ? '[REDACTED]' : undefined
+        apiKey: clientConfig.apiKey ? '[REDACTED]' : undefined
       });
     }
     
