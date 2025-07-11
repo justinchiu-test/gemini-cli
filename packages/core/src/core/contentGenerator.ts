@@ -130,7 +130,7 @@ export function createContentGeneratorConfig(
       console.log('[DEBUG] Configuring Cohere Staging:');
       console.log('  - API Key available:', !!cohereStagingApiKey);
       console.log('  - API Key length:', cohereStagingApiKey.length);
-      console.log('  - API Key starts with:', cohereStagingApiKey.substring(0, 10) + '...');
+      console.log('  - API Key:', cohereStagingApiKey);
     }
     contentGeneratorConfig.apiKey = cohereStagingApiKey;
     contentGeneratorConfig.vertexai = false;

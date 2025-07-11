@@ -36,6 +36,7 @@ export class CohereContentGenerator implements ContentGenerator {
       console.log('[DEBUG] CohereContentGenerator constructor:');
       console.log('  - API Key received:', !!config.apiKey);
       console.log('  - API Key length:', config.apiKey.length);
+      console.log('  - API Key:', config.apiKey);
       console.log('  - Base URL:', config.baseURL || 'default (https://api.cohere.com)');
       console.log('  - Model:', config.model);
     }
@@ -49,10 +50,7 @@ export class CohereContentGenerator implements ContentGenerator {
     }
     
     if (process.env.DEBUG) {
-      console.log('[DEBUG] Creating CohereClientV2 with config:', {
-        ...clientConfig,
-        apiKey: clientConfig.apiKey ? '[REDACTED]' : undefined
-      });
+      console.log('[DEBUG] Creating CohereClientV2 with config:', clientConfig);
     }
     
     this.client = new CohereClientV2(clientConfig);
