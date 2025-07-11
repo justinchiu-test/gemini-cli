@@ -195,7 +195,7 @@ export async function createContentGenerator(
     return new CohereContentGenerator({
       apiKey: config.apiKey,
       model: config.model || 'c3-sweep-ecsydrkq-690h-fp16',
-      baseURL: 'https://stg.api.cohere.com/v2',
+      baseURL: 'https://stg.api.cohere.com',
     });
   }
 

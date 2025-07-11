@@ -46,7 +46,7 @@ export class CohereContentGenerator implements ContentGenerator {
     };
     
     if (config.baseURL) {
-      clientConfig.baseURL = config.baseURL;
+      clientConfig.environment = config.baseURL;
     }
     
     if (process.env.DEBUG) {
