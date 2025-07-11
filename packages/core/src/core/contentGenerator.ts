@@ -188,14 +188,14 @@ export async function createContentGenerator(
   if (config.authType === AuthType.USE_COHERE_STAGING && config.apiKey) {
     if (process.env.DEBUG) {
       console.log('[DEBUG] Creating Cohere Staging Content Generator:');
-      console.log('  - Base URL: https://stg.api.cohere.ai/compatibility/v1');
+      console.log('  - Base URL: https://stg.api.cohere.com/v2');
       console.log('  - Model:', config.model || 'c3-sweep-ecsydrkq-690h-fp16');
       console.log('  - API Key passed:', !!config.apiKey);
     }
     return new CohereContentGenerator({
       apiKey: config.apiKey,
       model: config.model || 'c3-sweep-ecsydrkq-690h-fp16',
-      baseURL: 'https://stg.api.cohere.ai/compatibility/v1',
+      baseURL: 'https://stg.api.cohere.com/v2',
     });
   }
 
