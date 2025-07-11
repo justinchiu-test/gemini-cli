@@ -32,10 +32,30 @@ export class CohereContentGenerator implements ContentGenerator {
     model: string;
     baseURL?: string;
   }) {
-    this.client = new CohereClientV2({
+    if (process.env.DEBUG) {
+      console.log('[DEBUG] CohereContentGenerator constructor:');
+      console.log('  - API Key received:', !!config.apiKey);
+      console.log('  - API Key length:', config.apiKey.length);
+      console.log('  - Base URL:', config.baseURL || 'default (https://api.cohere.com)');
+      console.log('  - Model:', config.model);
+    }
+    
+    const clientConfig: any = {
       token: config.apiKey,
-      ...(config.baseURL && { baseURL: config.baseURL }),
-    });
+    };
+    
+    if (config.baseURL) {
+      clientConfig.baseURL = config.baseURL;
+    }
+    
+    if (process.env.DEBUG) {
+      console.log('[DEBUG] Creating CohereClientV2 with config:', {
+        ...clientConfig,
+        token: clientConfig.token ? '[REDACTED]' : undefined
+      });
+    }
+    
+    this.client = new CohereClientV2(clientConfig);
     this.model = config.model;
     this.baseURL = config.baseURL;
   }
@@ -120,6 +140,14 @@ export class CohereContentGenerator implements ContentGenerator {
       }
 
 
+      if (process.env.DEBUG) {
+        console.log('[DEBUG] Making Cohere API call:');
+        console.log('  - Base URL:', this.baseURL || 'default');
+        console.log('  - Model:', requestParams.model);
+        console.log('  - Messages count:', requestParams.messages.length);
+        console.log('  - Has tools:', !!requestParams.tools);
+      }
+      
       const stream = await this.client.chatStream(requestParams);
 
       let accumulatedText = '';
@@ -257,6 +285,12 @@ export class CohereContentGenerator implements ContentGenerator {
         }
       }
     } catch (error) {
+      if (process.env.DEBUG) {
+        console.log('[DEBUG] Cohere API Error:');
+        console.log('  - Error type:', error?.constructor?.name);
+        console.log('  - Error message:', (error as any)?.message);
+        console.log('  - Error details:', JSON.stringify(error, null, 2));
+      }
       throw this.convertError(error);
     }
   }
@@ -701,6 +735,16 @@ export class CohereContentGenerator implements ContentGenerator {
   }
 
   private convertError(error: any): Error {
+    if (process.env.DEBUG) {
+      console.log('[DEBUG] Converting error:');
+      console.log('  - Error name:', error?.name);
+      console.log('  - Error message:', error?.message);
+      console.log('  - Error status:', error?.status);
+      console.log('  - Error statusCode:', error?.statusCode);
+      console.log('  - Error response:', error?.response);
+      console.log('  - Full error:', error);
+    }
+    
     if (error.name === 'CohereError') {
       return new Error(`Cohere API Error: ${error.message}`);
     }

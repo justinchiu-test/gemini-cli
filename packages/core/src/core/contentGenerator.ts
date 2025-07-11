@@ -72,6 +72,11 @@ export function createContentGeneratorConfig(
   const googleCloudLocation = process.env.GOOGLE_CLOUD_LOCATION || undefined;
   const cohereApiKey = process.env.COHERE_API_KEY || undefined;
   const cohereStagingApiKey = process.env.CO_API_KEY_STAGING || undefined;
+  if (process.env.DEBUG && authType === AuthType.USE_COHERE_STAGING) {
+    console.log('[DEBUG] Environment check for CO_API_KEY_STAGING:');
+    console.log('  - Raw value exists:', !!process.env.CO_API_KEY_STAGING);
+    console.log('  - Processed value exists:', !!cohereStagingApiKey);
+  }
 
   // Use runtime model from config if available, otherwise fallback to parameter or default
   const effectiveModel = config.getModel() || DEFAULT_GEMINI_MODEL;
@@ -121,6 +126,12 @@ export function createContentGeneratorConfig(
   }
 
   if (authType === AuthType.USE_COHERE_STAGING && cohereStagingApiKey) {
+    if (process.env.DEBUG) {
+      console.log('[DEBUG] Configuring Cohere Staging:');
+      console.log('  - API Key available:', !!cohereStagingApiKey);
+      console.log('  - API Key length:', cohereStagingApiKey.length);
+      console.log('  - API Key starts with:', cohereStagingApiKey.substring(0, 10) + '...');
+    }
     contentGeneratorConfig.apiKey = cohereStagingApiKey;
     contentGeneratorConfig.vertexai = false;
     contentGeneratorConfig.model = 'c3-sweep-ecsydrkq-690h-fp16';
@@ -175,10 +186,16 @@ export async function createContentGenerator(
   }
 
   if (config.authType === AuthType.USE_COHERE_STAGING && config.apiKey) {
+    if (process.env.DEBUG) {
+      console.log('[DEBUG] Creating Cohere Staging Content Generator:');
+      console.log('  - Base URL: https://stg.api.cohere.ai/compatibility/v1');
+      console.log('  - Model:', config.model || 'c3-sweep-ecsydrkq-690h-fp16');
+      console.log('  - API Key passed:', !!config.apiKey);
+    }
     return new CohereContentGenerator({
       apiKey: config.apiKey,
       model: config.model || 'c3-sweep-ecsydrkq-690h-fp16',
-      baseURL: 'https://stg.api.cohere.ai/v2',
+      baseURL: 'https://stg.api.cohere.ai/compatibility/v1',
     });
   }
 
