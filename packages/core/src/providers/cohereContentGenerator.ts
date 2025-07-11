@@ -42,7 +42,7 @@ export class CohereContentGenerator implements ContentGenerator {
     }
     
     const clientConfig: any = {
-      apiKey: config.apiKey,
+      token: config.apiKey,
     };
     
     if (config.baseURL) {
