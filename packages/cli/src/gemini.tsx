@@ -110,7 +110,7 @@ export async function main() {
   // Check if a provider was specified via CLI flag - this overrides settings
   const yargs = await import('yargs/yargs');
   const { hideBin } = await import('yargs/helpers');
-  const argv = await yargs.default(hideBin(process.argv))
+  const cliArgs = await yargs.default(hideBin(process.argv))
     .option('provider', {
       type: 'string',
       choices: ['gemini', 'cohere', 'coherestaging'],
@@ -118,9 +118,9 @@ export async function main() {
     .help(false)
     .version(false)
     .parse();
-  if (argv.provider) {
+  if (cliArgs.provider) {
     let authType: AuthType | undefined;
-    switch (argv.provider) {
+    switch (cliArgs.provider) {
       case 'cohere':
         authType = AuthType.USE_COHERE;
         break;

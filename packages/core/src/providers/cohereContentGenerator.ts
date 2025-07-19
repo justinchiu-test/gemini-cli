@@ -268,7 +268,8 @@ export class CohereContentGenerator implements ContentGenerator {
                 return fc;
               });
               // console.log('DEBUG: Tool calls completed:', JSON.stringify(functionCalls, null, 2));
-              yield this.createStreamResponse(accumulatedText, functionCalls, usageMetadata);
+              // Don't include accumulated text with function calls - just the function calls
+              yield this.createStreamResponse('', functionCalls, usageMetadata);
             }
             break;
 
@@ -324,6 +325,11 @@ export class CohereContentGenerator implements ContentGenerator {
   supportsJsonMode(): boolean {
     // Cohere doesn't support JSON mode / generateJson
     return false;
+  }
+
+  async getTier(): Promise<undefined> {
+    // Cohere doesn't have user tiers like Google's API
+    return undefined;
   }
 
   private checkForOrphanedToolCalls(messages: Cohere.ChatMessageV2[]): boolean {
