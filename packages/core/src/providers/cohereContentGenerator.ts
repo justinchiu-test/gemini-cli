@@ -26,6 +26,7 @@ export class CohereContentGenerator implements ContentGenerator {
   private client: CohereClientV2;
   private model: string;
   private baseURL?: string;
+  private recentToolResponses: Map<string, string> = new Map();
 
   constructor(config: {
     apiKey: string;
@@ -151,6 +152,7 @@ export class CohereContentGenerator implements ContentGenerator {
       let accumulatedText = '';
       let currentToolCalls: Cohere.ToolCallV2[] = [];
       let usageMetadata: UsageMetadata | undefined;
+      let lastToolCallContent: string | undefined;
 
       for await (const event of stream) {
         // console.log('DEBUG: Event type:', event.type);
@@ -162,9 +164,18 @@ export class CohereContentGenerator implements ContentGenerator {
           case 'content-delta':
             if (event.delta?.message?.content?.text) {
               const deltaText = event.delta.message.content.text;
-              accumulatedText += deltaText;
-              // Yield only the delta text, not accumulated
-              yield this.createStreamResponse(deltaText, [], usageMetadata);
+              
+              // Check if we should filter this text
+              if (!this.isToolResultEcho(accumulatedText + deltaText)) {
+                accumulatedText += deltaText;
+                // Yield only the delta text, not accumulated
+                yield this.createStreamResponse(deltaText, [], usageMetadata);
+              } else {
+                // This is an echo of tool results, skip it
+                if (process.env.DEBUG) {
+                  console.log('[DEBUG] Filtered tool result echo from Cohere response');
+                }
+              }
             }
             break;
 
@@ -280,6 +291,11 @@ export class CohereContentGenerator implements ContentGenerator {
               // Only yield usage metadata update, not duplicate content
               yield this.createStreamResponse('', [], usageMetadata);
             }
+            // Clear recent tool responses after message completes
+            // Keep them for a bit in case there are multiple messages
+            if (this.recentToolResponses.size > 10) {
+              this.recentToolResponses.clear();
+            }
             break;
         }
       }
@@ -330,6 +346,34 @@ export class CohereContentGenerator implements ContentGenerator {
   async getTier(): Promise<undefined> {
     // Cohere doesn't have user tiers like Google's API
     return undefined;
+  }
+
+  private isToolResultEcho(text: string): boolean {
+    // Check if this text is just echoing a recent tool response
+    const trimmedText = text.trim();
+    
+    // Check for code block wrappers that Cohere often adds
+    const codeBlockPattern = /^```[\s\S]*?```$|^<pre><code>[\s\S]*?<\/code><\/pre>$/;
+    let innerContent = trimmedText;
+    
+    if (codeBlockPattern.test(trimmedText)) {
+      // Extract content from code blocks
+      innerContent = trimmedText
+        .replace(/^```[a-z]*\n?/, '')
+        .replace(/\n?```$/, '')
+        .replace(/^<pre><code>/, '')
+        .replace(/<\/code><\/pre>$/, '')
+        .trim();
+    }
+    
+    // Check if this matches any recent tool response
+    for (const [_, response] of this.recentToolResponses) {
+      if (response.trim() === innerContent || response.trim().includes(innerContent)) {
+        return true;
+      }
+    }
+    
+    return false;
   }
 
   private checkForOrphanedToolCalls(messages: Cohere.ChatMessageV2[]): boolean {
@@ -489,6 +533,8 @@ export class CohereContentGenerator implements ContentGenerator {
               toolCallId: toolCallId,
               content: responseContent,
             });
+            // Track this tool response to filter echoes later
+            this.recentToolResponses.set(toolCallId, responseContent);
           }
         });
       }

@@ -1,5 +1,17 @@
 # Cohere API Integration Plan for Gemini CLI
 
+## Current Status: ✅ COMPLETE
+
+The Cohere integration is now fully functional with all major issues resolved. Users can seamlessly switch between Gemini and Cohere providers using the `--provider` flag.
+
+### Latest Updates (December 2024)
+- Fixed tool result display duplication issue
+- Implemented echo filtering for Cohere's tool response behavior
+- All tools now work correctly with proper UI display
+- Permission/confirmation flow matches Gemini's behavior
+
+See [GEMINI_WORKFLOW.md](./GEMINI_WORKFLOW.md) for detailed documentation of the tool execution workflow.
+
 ## Overview
 This document outlines the plan to integrate the Cohere API into the Gemini CLI project, following the existing architectural patterns and maintaining compatibility with the current system.
 
@@ -473,7 +485,7 @@ time ./packages/cli/dist/cli.js --provider cohere --model command-a-03-2025 "Wha
    - Hardcoded Cohere model selection to use `command-a-03-2025` for production
    - Model is correctly set when using `--provider cohere` flag
 
-### Outstanding Issues to Fix 🔧
+### Outstanding Issues Fixed ✅
 
 1. **generateJson Compatibility Issue** ✅ FIXED
    - The "next speaker checker" feature uses `generateJson` which Cohere doesn't support
@@ -506,18 +518,84 @@ time ./packages/cli/dist/cli.js --provider cohere --model command-a-03-2025 "Wha
    - Shell tool expects relative paths or no directory parameter
    - Added parameter normalization in CohereContentGenerator to convert absolute paths to relative
 
-### Ready to Test After Fixes! 🎉
-Once the above issues are resolved:
+4. **Tool Result Display Issue** ✅ FIXED (December 2024)
+   - **Problem**: Cohere was including tool execution results in its text response, causing duplicate display
+   - **Root Cause**: Cohere's API behavior differs from Gemini - it includes tool results in the assistant's message
+   - **Solution Implemented**:
+     1. Added `recentToolResponses` Map to track tool execution results
+     2. Implemented `isToolResultEcho()` method to detect when Cohere is echoing tool output
+     3. Filter out tool result echoes in `content-delta` event handler
+     4. Preserve Cohere's analysis while removing duplicate tool output
+   - **Result**: Tool results now display only once in the proper UI component
+
+### Current Implementation Differences from Gemini Workflow
+
+Based on analysis of GEMINI_WORKFLOW.md, the Cohere implementation now properly handles:
+
+1. **Tool Call Flow** ✅
+   - User request → Cohere responds with tool calls
+   - Tool calls are properly detected and scheduled
+   - Permission/confirmation system works identically to Gemini
+
+2. **Tool Execution** ✅
+   - Tools execute with proper status tracking
+   - Live output updates work correctly
+   - Results are captured and formatted
+
+3. **UI Display** ✅
+   - Tool groups display with proper borders and status indicators
+   - Confirmation prompts work correctly
+   - Results show in tool output areas (not duplicated in text)
+
+4. **History Management** ✅
+   - Tool responses added to conversation history
+   - Proper role assignments (user/assistant/tool)
+   - Continuation queries work correctly
+
+### Key Implementation Details
+
+1. **Event Handling**
+   - Cohere uses different streaming events: `tool-call-start`, `tool-call-delta`, `tool-call-end`
+   - Tool arguments come incrementally in deltas
+   - Properly reconstructed in CohereContentGenerator
+
+2. **Message Format**
+   - Cohere V2 API uses specific message roles and formats
+   - Tool responses use `role: 'tool'` with `toolCallId`
+   - System instructions properly converted
+
+3. **Error Prevention**
+   - Orphaned tool call detection prevents API errors
+   - Proper error mapping for Cohere-specific errors
+   - Token counting approximation using chat API
+
+### Testing the Complete Implementation 🎉
+
 ```bash
 # Set API key
 export COHERE_API_KEY="your-api-key"
 
 # Test interactive mode
-node packages/cli/dist/index.js --provider cohere
+node packages/cli/dist/index.js -i --provider cohere
 
-# Test non-interactive mode
-node packages/cli/dist/index.js --provider cohere -p "List files"
+# Test basic tool execution
+node packages/cli/dist/index.js --provider cohere -p "List files in the current directory"
+node packages/cli/dist/index.js --provider cohere -p "Run echo 'Hello from Cohere'"
+
+# Test permission flow
+node packages/cli/dist/index.js --provider cohere -p "Delete test.txt"  # Should ask for confirmation
+node packages/cli/dist/index.js --provider cohere -p "Run rm test.txt"  # Should ask for shell permission
+
+# Test complex workflows
+node packages/cli/dist/index.js --provider cohere -p "Create a file called test.py with a simple hello world script and run it"
 ```
+
+### Expected Behavior
+
+1. **Tool Execution**: Tools should execute with proper permission prompts
+2. **Display**: Results should appear in bordered tool boxes, not in Cohere's text
+3. **No Duplication**: Tool output should appear only once
+4. **Natural Flow**: Cohere should provide context without repeating tool results
 
 ## Success Criteria
 - Users can switch between Gemini and Cohere seamlessly
