@@ -375,8 +375,13 @@ export class Config {
     if (!this.geminiClient) {
       return undefined;
     }
-    const generator = this.geminiClient.getContentGenerator();
-    return await generator.getTier?.();
+    try {
+      const generator = this.geminiClient.getContentGenerator();
+      return await generator.getTier?.();
+    } catch (error) {
+      // Content generator not initialized yet, return undefined
+      return undefined;
+    }
   }
 
   getEmbeddingModel(): string {
